@@ -51,7 +51,7 @@ class ApplicationController extends Controller
         $set_num = substr($set_num, 0, -1);
         $set_num = (int)$set_num;
         if(is_numeric($set_num))$set_num++;
-        $set_num = sprintf('%09d', $set_num);
+        $set_num = sprintf('%08d', $set_num);
         $application_id = 'WC'.$set_num.'1';
         $save_app_data = array(
             'application_id' => $application_id,

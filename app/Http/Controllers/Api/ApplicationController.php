@@ -63,6 +63,7 @@ class ApplicationController extends Controller
             'ceo_birthday' => $request->ceo_birthday,
             'gmv_flag' => $request->gmv_flag,
             'average_flag' => $request->average_flag,
+            'state' => $request->state,
         );
         $application = Application::create( $save_app_data );
         Log::info('Create application.');

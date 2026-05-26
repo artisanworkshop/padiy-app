@@ -100,10 +100,10 @@ class CsvImportController extends Controller
                 foreach ($sheetData as $row) {
                     if ($row !== reset($sheetData)) {
                         try {
-                            // applicationsテーブルからsite_idを取得
+                            // applicationsテーブルからsite_idとstateを取得
                             $application = DB::table('applications')
                                 ->where('application_id', $row[0])
-                                ->select('site_id')
+                                ->select('site_id', 'state')
                                 ->first();
 
                             if (!$application) {
@@ -150,6 +150,7 @@ class CsvImportController extends Controller
                                 'secret_live_key' => $encryptedSecretLiveKey,
                                 'public_test_key' => $encryptedPublicTestKey,
                                 'secret_test_key' => $encryptedSecretTestKey,
+                                'state' => $application->state,
                                 'updated_at' => Carbon::now()->toDateTimeString()
                             ]);
 

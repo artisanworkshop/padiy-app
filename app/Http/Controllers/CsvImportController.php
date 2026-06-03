@@ -133,10 +133,10 @@ class CsvImportController extends Controller
                             $iv = substr(hash('sha256', $site->site_hash . 'iv'), 0, 16);
 
                             // 各キーを暗号化
-                            $encryptedPublicLiveKey = base64_encode(openssl_encrypt($row[2], $method, $key, 0, $iv));
-                            $encryptedSecretLiveKey = base64_encode(openssl_encrypt($row[3], $method, $key, 0, $iv));
-                            $encryptedPublicTestKey = base64_encode(openssl_encrypt($row[4], $method, $key, 0, $iv));
-                            $encryptedSecretTestKey = base64_encode(openssl_encrypt($row[5], $method, $key, 0, $iv));
+                            $encryptedPublicLiveKey = base64_encode(openssl_encrypt($row[2], $method, $key, OPENSSL_RAW_DATA, $iv));
+                            $encryptedSecretLiveKey = base64_encode(openssl_encrypt($row[3], $method, $key, OPENSSL_RAW_DATA, $iv));
+                            $encryptedPublicTestKey = base64_encode(openssl_encrypt($row[4], $method, $key, OPENSSL_RAW_DATA, $iv));
+                            $encryptedSecretTestKey = base64_encode(openssl_encrypt($row[5], $method, $key, OPENSSL_RAW_DATA, $iv));
 
                             if( "/" === substr($site->site_url, -1)){
                                 $site_url = $site->site_url;

@@ -67,6 +67,10 @@ class ApplicationController extends Controller
         );
         $application = Application::create( $save_app_data );
         Log::info('Create application.');
+        if (empty($request->state) || !preg_match('/^[A-Za-z0-9]{32}$/', $request->state)) {
+            // stateが無いとCSV取込時の加盟店サイトへの自動送信が403で失敗する（旧プラグイン互換のため拒否はしない）
+            Log::warning('Application received without valid state token: ' . $application_id);
+        }
 
         // Save survey data to application_metas table.
         $survey_meta_keys = [

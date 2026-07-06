@@ -127,6 +127,21 @@ class CsvImportController extends Controller
                                 ];
                                 continue;
                             }
+
+                            // stateトークンが無い申込は受信側で必ず403になるため送信しない
+                            if (empty($application->state)) {
+                                DB::table('applications')->where('application_id', $row[0])->update([
+                                    'set_status' => 0,
+                                    'updated_at' => Carbon::now()
+                                ]);
+
+                                $api_error_list[] = [
+                                    'application_id' => $row[0],
+                                    'site_url' => $site->site_url,
+                                    'error' => 'stateトークン未保存の申込です（旧バージョンのプラグインからの申込）。自動送信できないため、加盟店側での手動キー設定または再申込が必要です。'
+                                ];
+                                continue;
+                            }
                             // site_hashを使って暗号化キーとIVを生成
                             $method = 'AES-256-CBC';
                             $key = substr(hash('sha256', $site->site_hash), 0, 32);
@@ -171,10 +186,19 @@ class CsvImportController extends Controller
                                     'updated_at' => Carbon::now()
                                 ]);
 
+                                $error_code = $response->json('code');
+                                if ($error_code === 'paidy_invalid_state') {
+                                    $api_error = '加盟店サイト側のstateトークンが期限切れまたは消滅しています。加盟店にプラグイン最新版への更新と再申込、または手動キー設定を案内してください。';
+                                } elseif ($error_code === 'paidy_not_configured') {
+                                    $api_error = '加盟店サイトのPaidy受信設定（site_hash）が未設定です。';
+                                } else {
+                                    $api_error = 'HTTPステータス: ' . $response->status() . ' - ' . $response->body();
+                                }
+
                                 $api_error_list[] = [
                                     'application_id' => $row[0],
                                     'site_url' => $site_url,
-                                    'error' => 'HTTPステータス: ' . $response->status() . ' - ' . $response->body()
+                                    'error' => $api_error
                                 ];
                             }
                         } catch (\Exception $e) {

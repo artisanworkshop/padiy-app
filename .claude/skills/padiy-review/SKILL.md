@@ -52,17 +52,28 @@ R3: (R2でCritical/Highが出た場合のみ) 修正 → 最終判定
    - `main` で `origin/main` より進んでいる: `BASE=origin/main`
    - `main` で `origin/main` と一致し、未コミット変更のみ: `BASE=HEAD`
    - 上記いずれにも差分が無い: レビュー対象が無い。範囲（例: `HEAD~3`）をユーザーに確認する
-3. R1 の対象差分は `git diff $BASE`（ワーキングツリーまで含む）。ステージ済み/未ステージを問わない
-4. **ラウンド境界のスナップショット**: 各ラウンドの「レビュー対象」と「修正後」の状態を
+3. **未追跡ファイルを先に取り込む**。`git diff` も `git stash create` も未追跡ファイルを含まないため、
+   新規の Controller / Service / migration / テストがレビューとスナップショットから漏れる。
+   ラウンド開始時（および修正後のスナップショット前）に必ず:
+   ```bash
+   git ls-files --others --exclude-standard     # 未追跡ファイルの一覧を R<n>.md に記録
+   git add -A                                    # 内容は変えずインデックスに載せる（コミットはしない）
+   ```
+   `git add -N`（intent-to-add）は `git diff` には効くが `git stash create` が
+   「Entry not uptodate. Cannot merge」で失敗するので使わない。
+   `git add -A` でレビュー対象外のゴミ（一時ファイル等）まで載る場合は、その旨をユーザーに伝えて除外する
+4. R1 の対象差分は `git diff $BASE`（ステージ済み + 未ステージ + 手順3で取り込んだ新規ファイル）
+5. **ラウンド境界のスナップショット**: 各ラウンドの「レビュー対象」と「修正後」の状態を
    `git stash create` で作る（ブランチもワーキングツリーも変更しない）:
    ```bash
-   SNAP=$(git stash create "padiy-review R1 target") ; echo ${SNAP:-$(git rev-parse HEAD)}
+   git add -A && SNAP=$(git stash create "padiy-review R1 target") ; echo ${SNAP:-$(git rev-parse HEAD)}
    ```
    空文字が返る（= ワーキングツリーがクリーン）場合は `HEAD` を使う。
-   得られた sha を R<n>.md に記録し、次ラウンドの差分起点にする（`git diff <前ラウンド修正後SNAP>`）。
+   得られた sha を R<n>.md に記録し、次ラウンドの差分起点にする（`git diff <前ラウンド修正後SNAP>`。
+   この diff には前ラウンド以降に追加した新規ファイルも含まれる）。
    stash create のオブジェクトは同一セッション内で参照できれば十分。消えていた場合は
    R<n>.md に記録した**修正ファイル一覧**を対象に `git diff $BASE -- <files>` で代替する
-5. ユーザーが途中でコミットを指示した場合は、以降の起点をそのコミット sha に置き換えてよい
+6. ユーザーが途中でコミットを指示した場合は、以降の起点をそのコミット sha に置き換えてよい
 
 ## ラウンドの自動判定
 
@@ -70,11 +81,14 @@ R3: (R2でCritical/Highが出た場合のみ) 修正 → 最終判定
 置換したもの（例: `fix/signed-callback-resend` → `fix-signed-callback-resend`）。
 `main` 直接作業の場合は `main-<YYYYMMDD>`。
 
-1. `docs/reviews/<dir>/` 内の既存 `R*.md` を確認
-   - 無ければ **R1**
-   - `R1.md` があれば **R2**、`R2.md` があれば **R3**
-   - `R3.md` まで存在する場合はループ完了済み。再実行せず、ユーザーに
-     「ループは完了しています。新規ループを始めるなら reset を指示してください」と伝える
+1. `docs/reviews/<dir>/` 内の既存 `R*.md` を確認し、**最新ラウンドの判定行**（`- 判定:`）で決める
+   - `R*.md` が無ければ **R1**
+   - 最新が `R1.md`: 判定が APPROVE かつ「修正ファイル」が無い（修正ゼロ）なら**完了**。
+     それ以外（修正を行った、または CHANGES REQUESTED）なら **R2**
+   - 最新が `R2.md`: 判定が APPROVE なら**完了**。新規 Critical/High が出て修正した場合のみ **R3**
+   - 最新が `R3.md`: **完了**（判定にかかわらず。未収束なら R3.md にその旨が記録されている）
+   - 完了済みの場合は再実行せず、ユーザーに
+     「ループは完了しています（最終判定: <R<n> の判定>）。新規ループを始めるなら reset を指示してください」と伝える
 2. ユーザーが「reset」「最初から」と言った場合は `R*.md` を `archive/` へ移動して R1 から開始
 3. 各ラウンド開始時に `git rev-parse HEAD` とスナップショット sha を R<n>.md の冒頭に明記する
 

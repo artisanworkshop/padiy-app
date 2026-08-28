@@ -46,7 +46,9 @@
 - 入力列: `[0]=application_id (WC…)`, `[1]=paidy_status`, `[2]=public_live_key`, `[3]=secret_live_key`,
   `[4]=public_test_key`, `[5]=secret_test_key`。`approved` のときはキー 4 つ必須
 - 1 行ごとに `applications` を更新し、`PaidyCallbackSender` で加盟店へ送信、`set_status` に成否を記録
-- `state` が空/不正な行は送信をスキップしてエラー表示（`docs/issues/csv-import-null-error.md` の経緯を参照）
+- **`state` は任意**。空/不正でも送信を**スキップしない**（署名付きで送り、プラグイン 2.9.16+ の署名検証に委ねる。
+  2.9.15 以前は 403 `paidy_invalid_state` になり、`translateError()` がプラグイン更新を案内する）。
+  「state が無い行は送らない」に戻す変更は、旧プラグインからの申込を再び配信不能にする回帰なので High
 - ファイルバリデーション（`required|file|mimes:...|max:`）が無効化されていないか
 - 1 行の失敗でループ全体が止まらないか、成功/失敗一覧（`api_success_list` / `api_error_list`）に反映されるか
 
@@ -109,11 +111,13 @@ baseline に入れたものは以後のラウンドで指摘しない。
 ```bash
 # 差分の基点
 BASE=$(git merge-base origin/main HEAD)          # フィーチャーブランチ
-git diff --stat $BASE                             # 対象ファイル一覧（working tree 含む）
+git ls-files --others --exclude-standard          # 未追跡ファイル（git diff に出ないので必ず確認）
+git add -A                                        # 未追跡ファイルをインデックスに載せる（コミットはしない）
+git diff --stat $BASE                             # 対象ファイル一覧（working tree + 新規ファイル）
 
-# スナップショット（ブランチ・working tree を変更しない）
-SNAP=$(git stash create "padiy-review R1 target"); echo ${SNAP:-$(git rev-parse HEAD)}
-git diff <SNAP>                                   # スナップショット以降の差分
+# スナップショット（ブランチ・working tree を変更しない。git add -A 済みであること）
+git add -A && SNAP=$(git stash create "padiy-review R1 target"); echo ${SNAP:-$(git rev-parse HEAD)}
+git diff <SNAP>                                   # スナップショット以降の差分（新規ファイル含む）
 
 # 静的チェック
 git diff --name-only $BASE -- '*.php' | xargs -I{} php -l {}

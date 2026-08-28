@@ -38,6 +38,7 @@ Route::middleware('auth')->group(function () {
     Route::get('import-csv', [CsvImportController::class,'show'])->name('import-csv.show');
     Route::post('import-csv',  [CsvImportController::class,'import']);
     Route::get('application', [ApplicationController::class, 'index'])->name('application.index');
+    Route::post('application/{application}/resend', [ApplicationController::class, 'resend'])->name('application.resend');
     Route::get('sftp-upload', [PaidyConnectController::class, 'index'])->name('sftp-upload.index');
 });
 

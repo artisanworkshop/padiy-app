@@ -5,6 +5,12 @@
         </h2>
     </x-slot>
     <div class="mx-auto px-6">
+        @if (session('status'))
+        <div class="mt-4 p-4 bg-success w-full rouded-2xl" style="color:#fff">{{ session('status') }}</div>
+        @endif
+        @if (session('error'))
+        <div class="mt-4 p-4 bg-danger w-full rouded-2xl" style="color:#fff">{{ session('error') }}</div>
+        @endif
         <div class="mt-4 p-8 bg-white w-full rouded-2xl">
             <a href="/import-csv" class="btn btn-primary">インポート</a>
             <!-- Search function start here -->
@@ -69,7 +75,7 @@
             <!--Search function ends here -->
                     <table class="table">
                 <thead class="thead-primary">
-                    <tr><th>申込番号</th><th>サイト名</th><th>会社名</th><th>サイトURL</th><th>ステータス</th><th>送信結果</th><th>申込日時</th><th>更新日時</th></tr>
+                    <tr><th>申込番号</th><th>サイト名</th><th>会社名</th><th>サイトURL</th><th>ステータス</th><th>送信結果</th><th>プラグインVer</th><th>申込日時</th><th>更新日時</th><th>再送信</th></tr>
                 </thead>
                 <tbody>
                 @foreach ($applications as $application)
@@ -98,6 +104,7 @@
                         失敗
                         @endif
                     </td>
+                    <td>{{ $application->plugin_version ?? '-' }}</td>
                     <td>@if($application->created_at != null )
                         {{$application->created_at->format('Y年n月d日 G:i')}}
                         @endif
@@ -105,6 +112,17 @@
                     <td>@isset($application->updated_at)
                         {{$application->updated_at->format('Y年n月d日 G:i')}}
                         @endisset
+                    </td>
+                    <td>
+                        @if ($application->paidy_status != null)
+                        <form action="{{ route('application.resend', $application->id) }}" method="POST"
+                              onsubmit="return confirm('{{ $application->application_id }} の審査結果を加盟店サイトへ再送信します。よろしいですか？');">
+                            @csrf
+                            <button type="submit" class="btn btn-sm {{ $application->set_status == 1 ? 'btn-outline-secondary' : 'btn-warning' }}">再送信</button>
+                        </form>
+                        @else
+                        -
+                        @endif
                     </td>
                 </tr>
                 @isset($application->public_live_key)

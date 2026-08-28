@@ -6,12 +6,16 @@ use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
+use App\Services\PaidyCallbackSender;
 
 class CsvImportController extends Controller
 {
+    public function __construct(private PaidyCallbackSender $sender)
+    {
+    }
+
     public function import(Request $request)
     {
         // バリデーション
@@ -103,7 +107,7 @@ class CsvImportController extends Controller
                             // applicationsテーブルからsite_idとstateを取得
                             $application = DB::table('applications')
                                 ->where('application_id', $row[0])
-                                ->select('site_id', 'state')
+                                ->select('site_id', 'state', 'plugin_version')
                                 ->first();
 
                             if (!$application) {
@@ -128,77 +132,36 @@ class CsvImportController extends Controller
                                 continue;
                             }
 
-                            // stateトークンが無い申込は受信側で必ず403になるため送信しない
-                            if (empty($application->state)) {
-                                DB::table('applications')->where('application_id', $row[0])->update([
-                                    'set_status' => 0,
-                                    'updated_at' => Carbon::now()
-                                ]);
+                            $result = $this->sender->send(
+                                $row[0],
+                                $row[1],
+                                [
+                                    'public_live_key' => $row[2],
+                                    'secret_live_key' => $row[3],
+                                    'public_test_key' => $row[4],
+                                    'secret_test_key' => $row[5],
+                                ],
+                                $site,
+                                $application->state,
+                                $application->plugin_version
+                            );
 
-                                $api_error_list[] = [
-                                    'application_id' => $row[0],
-                                    'site_url' => $site->site_url,
-                                    'error' => 'stateトークン未保存の申込です（旧バージョンのプラグインからの申込）。自動送信できないため、加盟店側での手動キー設定または再申込が必要です。'
-                                ];
-                                continue;
-                            }
-                            // site_hashを使って暗号化キーとIVを生成
-                            $method = 'AES-256-CBC';
-                            $key = substr(hash('sha256', $site->site_hash), 0, 32);
-                            $iv = substr(hash('sha256', $site->site_hash . 'iv'), 0, 16);
-
-                            // 各キーを暗号化
-                            $encryptedPublicLiveKey = base64_encode(openssl_encrypt($row[2], $method, $key, OPENSSL_RAW_DATA, $iv));
-                            $encryptedSecretLiveKey = base64_encode(openssl_encrypt($row[3], $method, $key, OPENSSL_RAW_DATA, $iv));
-                            $encryptedPublicTestKey = base64_encode(openssl_encrypt($row[4], $method, $key, OPENSSL_RAW_DATA, $iv));
-                            $encryptedSecretTestKey = base64_encode(openssl_encrypt($row[5], $method, $key, OPENSSL_RAW_DATA, $iv));
-
-                            if( "/" === substr($site->site_url, -1)){
-                                $site_url = $site->site_url;
-                            }else{
-                                $site_url = $site->site_url . '/';
-                            }
-                            $response = Http::post( $site_url.'wp-json/paidy-receiver/v1/receive/', [
-                                'application_id' => $row[0],
-                                'paidy_status' => $row[1],
-                                'public_live_key' => $encryptedPublicLiveKey,
-                                'secret_live_key' => $encryptedSecretLiveKey,
-                                'public_test_key' => $encryptedPublicTestKey,
-                                'secret_test_key' => $encryptedSecretTestKey,
-                                'state' => $application->state,
-                                'updated_at' => Carbon::now()->toDateTimeString()
+                            DB::table('applications')->where('application_id', $row[0])->update([
+                                'set_status' => $result['success'] ? 1 : 0,
+                                'updated_at' => Carbon::now()
                             ]);
 
-                            if ($response->successful()) {
-                                $set_result = DB::table('applications')->where('application_id', $row[0])->update([
-                                    'set_status' => 1,
-                                    'updated_at' => Carbon::now()
-                                ]);
-
+                            if ($result['success']) {
                                 $api_success_list[] = [
                                     'application_id' => $row[0],
-                                    'site_url' => $site_url,
-                                    'status' => $response->status()
+                                    'site_url' => $result['site_url'],
+                                    'status' => $result['status']
                                 ];
                             } else {
-                                $set_result = DB::table('applications')->where('application_id', $row[0])->update([
-                                    'set_status' => 0,
-                                    'updated_at' => Carbon::now()
-                                ]);
-
-                                $error_code = $response->json('code');
-                                if ($error_code === 'paidy_invalid_state') {
-                                    $api_error = '加盟店サイト側のstateトークンが期限切れまたは消滅しています。加盟店にプラグイン最新版への更新と再申込、または手動キー設定を案内してください。';
-                                } elseif ($error_code === 'paidy_not_configured') {
-                                    $api_error = '加盟店サイトのPaidy受信設定（site_hash）が未設定です。';
-                                } else {
-                                    $api_error = 'HTTPステータス: ' . $response->status() . ' - ' . $response->body();
-                                }
-
                                 $api_error_list[] = [
                                     'application_id' => $row[0],
-                                    'site_url' => $site_url,
-                                    'error' => $api_error
+                                    'site_url' => $result['site_url'],
+                                    'error' => $result['error']
                                 ];
                             }
                         } catch (\Exception $e) {

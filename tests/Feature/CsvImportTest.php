@@ -65,25 +65,51 @@ class CsvImportTest extends TestCase
             ->post('import-csv', ['file' => $file]);
     }
 
-    public function test_application_without_state_is_skipped_with_manual_action_message(): void
+    public function test_application_without_state_is_sent_signed_without_state_param(): void
     {
-        Http::fake();
+        Http::fake([
+            self::RECEIVE_URL => Http::response(['success' => true], 200),
+        ]);
         $this->seedApplication(null);
 
         $response = $this->importCsv();
 
         $response->assertOk();
-        Http::assertNothingSent();
 
-        $api_error_list = $response->viewData('api_error_list');
-        $this->assertCount(1, $api_error_list);
-        $this->assertSame('WC000000561', $api_error_list[0]['application_id']);
-        $this->assertStringContainsString('stateトークン未保存', $api_error_list[0]['error']);
+        // 旧プラグインからの申込（state 未保存）も署名付きで送信し、受信側（2.9.16+）の署名検証に委ねる。
+        Http::assertSent(function ($request) {
+            $payload = json_decode($request->body(), true);
+            return $request->url() === self::RECEIVE_URL
+                && !array_key_exists('state', $payload)
+                && $request->hasHeader('X-Paidy-Receiver-Signature')
+                && $request->hasHeader('X-Paidy-Receiver-Timestamp');
+        });
 
         $this->assertDatabaseHas('applications', [
             'application_id' => 'WC000000561',
-            'set_status' => 0,
+            'set_status' => 1,
         ]);
+    }
+
+    public function test_callback_is_signed_with_site_hash_over_timestamp_and_raw_body(): void
+    {
+        Http::fake([
+            self::RECEIVE_URL => Http::response(['success' => true], 200),
+        ]);
+        $this->seedApplication(self::VALID_STATE);
+
+        $this->importCsv()->assertOk();
+
+        Http::assertSent(function ($request) {
+            $timestamp = $request->header('X-Paidy-Receiver-Timestamp')[0] ?? '';
+            $signature = $request->header('X-Paidy-Receiver-Signature')[0] ?? '';
+            $expected = hash_hmac('sha256', $timestamp . '.' . $request->body(), hash('sha256', 'test-site-hash'));
+
+            return $request->hasHeader('Content-Type', 'application/json')
+                && preg_match('/^[0-9]+$/', $timestamp) === 1
+                && abs(time() - (int) $timestamp) < 60
+                && hash_equals($expected, $signature);
+        });
     }
 
     public function test_invalid_state_response_is_translated_to_admin_message(): void

@@ -53,6 +53,10 @@ class ApplicationController extends Controller
         if(is_numeric($set_num))$set_num++;
         $set_num = sprintf('%08d', $set_num);
         $application_id = 'WC'.$set_num.'1';
+        // 申込元プラグインのバージョン（2.9.16 以降が送信。旧バージョンは null）。診断用。
+        $plugin_version = is_string($request->plugin_version)
+            ? substr(preg_replace('/[^0-9A-Za-z.\-+]/', '', $request->plugin_version), 0, 20)
+            : '';
         $save_app_data = array(
             'application_id' => $application_id,
             'site_id' => $site_id,
@@ -64,6 +68,7 @@ class ApplicationController extends Controller
             'gmv_flag' => $request->gmv_flag,
             'average_flag' => $request->average_flag,
             'state' => $request->state,
+            'plugin_version' => $plugin_version !== '' ? $plugin_version : null,
         );
         $application = Application::create( $save_app_data );
         Log::info('Create application.');
@@ -183,10 +188,32 @@ class ApplicationController extends Controller
             $survey06,// JCAアンケート14
             $request->survey07,// JCAアンケート入力欄02
         );
+        // ここから先（CSV 追記）で失敗しても申込は DB に登録済みなので 200 を返す。
+        // 5xx を返すとプラグイン側が「申込は届かなかった」と判断して state トークンを削除し、
+        // 後の審査結果送信が 403 (paidy_invalid_state) になる（孤児トークン）。
+        try {
+            $this->appendMerchantListCsv($file_url, $csv_data);
+        } catch (\Throwable $e) {
+            Log::error('Merchant list CSV append failed for ' . $application_id . ': ' . $e->getMessage());
+        }
+
+        return response()->json($application);
+    }
+
+    /**
+     * Box 転送用の加盟店リスト CSV に 1 行追記する（初回はヘッダー付きで新規作成）。
+     *
+     * @throws \RuntimeException ファイルを開けない場合
+     */
+    private function appendMerchantListCsv(string $file_url, array $csv_data): void
+    {
         if(file_exists($file_url)){
-            $fp = fopen($file_url, 'a');
+            $fp = @fopen($file_url, 'a');
         }else{
-            $fp = fopen($file_url, 'w');
+            $fp = @fopen($file_url, 'w');
+            if ($fp === false) {
+                throw new \RuntimeException('fopen failed: ' . $file_url);
+            }
             fwrite($fp, "\xEF\xBB\xBF");
             fputcsv($fp,
                 array(
@@ -245,10 +272,11 @@ class ApplicationController extends Controller
                 )
             );
         }
+        if ($fp === false) {
+            throw new \RuntimeException('fopen failed: ' . $file_url);
+        }
         fputcsv($fp, $csv_data);
         fclose($fp);
-
-        return response()->json($application);
     }
 
     public function update(ApplicationRequest $request, Application $application)
